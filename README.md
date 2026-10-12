@@ -1,398 +1,112 @@
-# KCT Workshop 
+# Cloud Workshop — Containerised Typing Game
 
-> **End-to-End Containerization and Cloud Deployment** — Workshop Demo Application
+**A neon falling-words typing game built with React and Vite, used as the demo app for a Docker and AWS (EC2 and ECR) containerisation workshop.**
 
-<p align="center">
-  <strong>A high-speed, neon-styled typing game</strong><br/>
-  Type falling words before they breach the firewall. Precision is key. Speed is survival.
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/React-19-61dafb?logo=react" alt="React 19" />
-  <img src="https://img.shields.io/badge/TypeScript-5.8-3178c6?logo=typescript" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Vite-6-646cff?logo=vite" alt="Vite" />
-  <img src="https://img.shields.io/badge/Tailwind-4-38bdf8?logo=tailwindcss" alt="Tailwind CSS" />
-  <img src="https://img.shields.io/badge/Docker-Ready-2496ed?logo=docker" alt="Docker" />
-</p>
-
----
+![React](https://img.shields.io/badge/React-61DAFB?style=flat&logo=react&logoColor=black) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white) ![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat&logo=vite&logoColor=white) ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-06B6D4?style=flat&logo=tailwindcss&logoColor=white) ![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white) ![Nginx](https://img.shields.io/badge/Nginx-009639?style=flat&logo=nginx&logoColor=white) ![AWS](https://img.shields.io/badge/AWS-232F3E?style=flat&logo=amazonwebservices&logoColor=white)
 
 ## Overview
 
-### KCT Workshop — Key Topics
+This repo is a small workshop exercise on taking a web app from `npm run dev` on a laptop to a container running on a cloud VM. The app itself is a one-screen typing game, "Workshop Game": words fall down the screen and you type them before they reach the bottom. The point of the repo is the packaging around it: a multi-stage `Dockerfile`, an `nginx.conf`, and the steps I followed for pushing the image to Amazon ECR and running it on EC2.
 
-1. **What is a Container?**
-2. **Why Containerize?**
-3. **Containerization Tools**
-4. **Before Cloud: [Netflix Cloud Migration](https://about.netflix.com/en/news/completing-the-netflix-cloud-migration)**
-5. **Why Choose a Cloud Platform?**
-6. **AWS ECS & EKS** (Container orchestration)
-7. **Security Best Practices**
-8. **CI/CD**
+Status: a finished workshop demo, not a product. The code, workshop steps and architecture diagram come from a workshop (KCT); the original README in this repo links to `duvarakesh1907/KCT-workshop` as the workshop repository, so this is my copy of that material rather than something I designed from scratch. The game has no backend, no saved scores and no tests.
 
-> **Demo App:** This repo uses a typing game to demonstrate end-to-end containerization and cloud deployment.
+## Key Features
 
-### Workshop Outcomes
+- **Falling-word typing game** — `src/components/NeonTypeGame.tsx` spawns words from `WORD_LIST` (about 150 words in `src/data/words.ts`) at positions between 10 and 90 percent of the screen width, and moves them down on every animation frame.
+- **Targeting and scoring** — typing the first letter locks onto the lowest matching word; a wrong key on a locked word flags an error. Completing a word scores `length x 10 x difficulty`.
+- **Lives and difficulty** — 5 lives, one lost per word that reaches the bottom; difficulty rises by 0.05 per completed word, capped at 5, and shortens the spawn interval (base 1500 ms).
+- **Live WPM** — computed from characters typed (5 characters per word) over elapsed time.
+- **Synthesised sound** — `src/utils/SoundManager.ts` generates keystroke, explosion, error and start sounds with the Web Audio API, so there are no audio files.
+- **Particle explosions and neon styling** — custom CSS theme tokens in `src/index.css` and the Orbitron / JetBrains Mono fonts.
+- **Production container** — multi-stage Docker build: Node 20 builds the app, nginx:alpine serves `dist/`, with a `/health` endpoint and a container `HEALTHCHECK`.
 
-By the end of this workshop, participants will be able to:
+## How It Works
 
-- **Run a web app locally** — Clone a repo, install dependencies, and start a development server (macOS, Linux, Windows)
-- **Containerize with Docker** — Build a production-ready Docker image and run it locally
-- **Deploy on AWS EC2** — Set up an EC2 instance (Amazon Linux), install Docker and Git
-- **Use Amazon ECR** — Create a container registry, push images, and run containers from ECR
-- **Complete the pipeline** — From local development to cloud deployment using industry-standard tools
+`src/main.tsx` mounts `App` (`src/app.tsx`), which renders only `NeonTypeGame`. The game keeps its fast-changing state (word list, score, lives, difficulty) in refs and copies it into React state for rendering. A `requestAnimationFrame` loop spawns, moves and removes words, and a `keydown` listener handles input (alphanumeric keys only; Enter starts or restarts). The game has three states: `start`, `playing` and `gameover`.
 
----
+Deployment flow, as set out in the workshop steps:
 
-## Architecture
+1. `docker build -t workshop-game .` runs `npm install` and `npm run build` in a `node:20-slim` stage (the Dockerfile notes Alpine causes problems with the `@tailwindcss/oxide` native bindings).
+2. The second stage copies `dist/` into `nginx:alpine` with `nginx.conf`: gzip, security headers, one-year immutable caching for `/assets/`, a fallback to `index.html` for all routes, and `GET /health` returning `OK`.
+3. The image is tagged and pushed to a private ECR repository created with `aws ecr create-repository`, then pulled and run on an Amazon Linux EC2 instance with `docker run -d -p 8080:80`.
 
-<p align="center">
-  <img src="KCT-workshop.drawio.png" alt="KCT Workshop - AWS Architecture" width="800"/>
-</p>
-
-*Multi-AZ deployment in Mumbai region: VPC with public/private subnets, ALB, NAT Gateway, ECR, and App Servers behind Security Groups.*
-
----
-
-## Prerequisites
-
-- **Local:** Node.js 20+ ([nvm](https://github.com/nvm-sh/nvm) recommended)
-- **EC2:** Amazon Linux 2 or Amazon Linux 2023, AWS CLI configured
-
-> **Repository:** [github.com/duvarakesh1907/KCT-workshop](https://github.com/duvarakesh1907/KCT-workshop)
-
----
-
-## 1. Run Locally (After Clone)
-
-### macOS / Linux
-
-```bash
-# Clone the repository
-git clone https://github.com/duvarakesh1907/KCT-workshop.git
-cd KCT-workshop
-```
-*Downloads the project and moves into its directory.*
-
-```bash
-# Install dependencies
-npm install
-```
-*Installs all required Node.js packages from package.json.*
-
-```bash
-# Start development server
-npm run dev
-```
-*Starts the Vite dev server with hot reload on port 3000.*
-
-### Windows (PowerShell)
-
-```powershell
-# Clone the repository
-git clone https://github.com/duvarakesh1907/KCT-workshop.git
-cd KCT-workshop
-```
-*Downloads the project and moves into its directory.*
-
-```powershell
-# Allow script execution (run once if you get execution policy errors)
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
-*Enables running npm scripts in PowerShell (fixes "script execution disabled" errors).*
-
-```powershell
-# Install dependencies
-npm.cmd install
-```
-*Installs all required Node.js packages (Windows executable).*
-
-```powershell
-# Start development server
-npm run dev
-```
-*Starts the Vite dev server with hot reload on port 3000.*
-
-Open **http://localhost:3000** in your browser.
-
----
-
-## 2. Run with Docker (Local)
-
-```bash
-# Clone (if not already done)
-git clone https://github.com/duvarakesh1907/KCT-workshop.git
-cd KCT-workshop
-```
-*Downloads the project.*
-
-```bash
-# Build the image
-docker build -t workshop-game .
-```
-*Builds a production-ready Docker image and tags it as `workshop-game`.*
-
-```bash
-# Run the container
-docker run -d -p 8080:80 --name workshop-game workshop-game
-```
-*Runs the container in the background, mapping host port 8080 to container port 80.*
-
-Open **http://localhost:8080** in your browser.
-
-**Stop and remove:**
-```bash
-docker stop workshop-game      # Stops the running container
-docker rm workshop-game        # Removes the stopped container
-```
-
----
-
-## 3. EC2 + Amazon ECR Deployment
-
-Follow these steps on an **EC2 instance** running **Amazon Linux 2** or **Amazon Linux 2023**.
-
-### Step 1: Update System & Install Git
-
-**Amazon Linux 2023:**
-```bash
-sudo dnf update -y
-```
-*Updates all installed packages to the latest versions.*
-
-```bash
-sudo dnf install git -y
-git --version
-```
-*Installs Git and verifies the installation.*
-
-**Amazon Linux 2:**
-```bash
-sudo yum update -y
-```
-*Updates all installed packages.*
-
-```bash
-sudo yum install git -y
-git --version
-```
-*Installs Git and verifies the installation.*
-
-### Step 2: Install Docker
-
-**Amazon Linux 2023:**
-```bash
-sudo dnf install docker -y
-```
-*Installs the Docker engine.*
-
-```bash
-sudo systemctl start docker
-sudo systemctl enable docker
-```
-*Starts Docker now and enables it to start on boot.*
-
-```bash
-sudo usermod -aG docker $USER
-newgrp docker
-```
-*Adds your user to the docker group so you can run Docker without sudo. `newgrp` applies the change in the current session.*
-
-```bash
-docker --version
-```
-*Verifies Docker is installed and running.*
-
-**Amazon Linux 2:**
-```bash
-sudo yum install docker -y
-sudo systemctl start docker
-sudo systemctl enable docker
-sudo usermod -aG docker ec2-user
-newgrp docker
-docker --version
-```
-*Same as above; use `ec2-user` as the default username on AL2.*
-
-### Step 3: Clone the Repository
-
-```bash
-git clone https://github.com/duvarakesh1907/KCT-workshop.git
-cd KCT-workshop
-```
-*Downloads the project source code to your EC2 instance.*
-
-### Step 4: Create ECR Repository (One-time)
-
-**Using AWS CLI:**
-```bash
-aws ecr create-repository --repository-name workshop-game --region ap-south-1
-```
-*Creates a new private container registry in ECR. Replace `ap-south-1` with your preferred region (e.g., `us-east-1`).*
-
-**Note the repository URI from the output:**
-```
-"repositoryUri": "<account-id>.dkr.ecr.ap-south-1.amazonaws.com/workshop-game"
-```
-*Replace `<account-id>` with your 12-digit AWS account ID.*
-
-### Step 5: Build the Docker Image
-
-```bash
-docker build -t workshop-game .
-```
-*Builds the app into a Docker image using the Dockerfile. The `-t` flag tags it as `workshop-game`.*
-
-### Step 6: Authenticate Docker to ECR
-
-```bash
-aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin <account-id>.dkr.ecr.ap-south-1.amazonaws.com
-```
-*Logs Docker into your ECR registry so you can push images. Replace `<account-id>` and `ap-south-1` with your values.*
-
-**Get your AWS account ID:**
-```bash
-aws sts get-caller-identity --query Account --output text
-```
-*Outputs your 12-digit AWS account ID.*
-
-### Step 7: Tag the Image for ECR
-
-```bash
-docker tag workshop-game:latest <account-id>.dkr.ecr.ap-south-1.amazonaws.com/workshop-game:latest
-```
-*Tags your local image with the full ECR URI so Docker knows where to push it. Replace `<account-id>` and region.*
-
-### Step 8: Push to ECR
-
-```bash
-docker push <account-id>.dkr.ecr.ap-south-1.amazonaws.com/workshop-game:latest
-```
-*Uploads the image to your ECR repository. Replace `<account-id>` and region.*
-
-### Step 9: Run the Container from ECR
-
-```bash
-docker run -d -p 8080:80 --name workshop-game <account-id>.dkr.ecr.ap-south-1.amazonaws.com/workshop-game:latest
-```
-*Pulls and runs the image from ECR. `-d` runs in background; `-p 8080:80` maps port 8080 to the container's port 80. Replace `<account-id>` and region.*
-
-**Access the app:** `http://<EC2-PUBLIC-IP>:8080`
-
-> Ensure EC2 Security Group allows inbound traffic on port 8080.
-
-**Stop and remove:**
-```bash
-docker stop workshop-game    # Stops the container
-docker rm workshop-game      # Removes the container
-```
-
----
-
-## Quick Reference: Full ECR Workflow
-
-Set these variables once (replace `<account-id>` and region with your values):
-
-```bash
-export AWS_ACCOUNT_ID=<account-id>
-export AWS_REGION=ap-south-1
-export ECR_URI=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/workshop-game
-```
-*Defines reusable variables for ECR URI. Use `aws sts get-caller-identity --query Account --output text` to get your account ID.*
-
-Then run:
-
-```bash
-# 1. Update, install git & docker
-sudo dnf update -y
-sudo dnf install git docker -y
-sudo systemctl start docker && sudo systemctl enable docker
-sudo usermod -aG docker $USER
-newgrp docker
-```
-*Updates system, installs Git and Docker, starts Docker, adds user to docker group.*
-
-```bash
-# 2. Clone
-git clone https://github.com/duvarakesh1907/KCT-workshop.git
-cd KCT-workshop
-```
-*Downloads the project.*
-
-```bash
-# 3. Build
-docker build -t workshop-game .
-```
-*Builds the Docker image.*
-
-```bash
-# 4. Login to ECR
-aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_URI
-```
-*Authenticates Docker to ECR.*
-
-```bash
-# 5. Tag & Push
-docker tag workshop-game:latest $ECR_URI:latest
-docker push $ECR_URI:latest
-```
-*Tags and uploads the image to ECR.*
-
-```bash
-# 6. Run (stop/remove existing container first if needed)
-docker rm -f workshop-game 2>/dev/null
-docker run -d -p 8080:80 --name workshop-game $ECR_URI:latest
-```
-*Removes any existing container, then runs the app from ECR.*
-
----
-
-## How to Play
-
-1. Press **Enter** or click "Initialize System" to start
-2. Type the first letter of any falling word to target it (highlighted in cyan)
-3. Complete the entire word before it reaches the red zone at the bottom
-4. You have 5 lives; each word that reaches the bottom costs 1 life
-5. Score increases with word length and difficulty multiplier
-
----
+The repo includes an architecture diagram (`KCT-workshop.drawio.png`) described as a multi-AZ deployment in the Mumbai region with a VPC, public and private subnets, ALB, NAT gateway, ECR and app servers. That diagram shows the target design from the workshop; the repo contains no infrastructure code for it.
 
 ## Tech Stack
 
-| Category   | Technology        |
-| ---------- | ----------------- |
-| Framework  | React 19          |
-| Language   | TypeScript 5.8    |
-| Build Tool | Vite 6            |
-| Styling    | Tailwind CSS 4    |
-| Production | Nginx in Docker   |
+- **Frontend:** React 19, TypeScript 5.8, Vite 6, Tailwind CSS 4 (`@tailwindcss/vite`), lucide-react icons, Framer Motion for animation (imported as `framer-motion`)
+- **Audio:** Web Audio API
+- **Serving:** nginx (alpine) in Docker
+- **Cloud (workshop steps):** AWS EC2, Amazon ECR, AWS CLI
 
----
+## Getting Started
+
+### Prerequisites
+- Node.js 20 or newer
+- Docker, for the container route
+- For the cloud steps: an AWS account, AWS CLI configured and an EC2 instance on Amazon Linux
+
+### Run locally
+```bash
+git clone https://github.com/Danushika06/Cloud_workshop.git
+cd Cloud_workshop
+npm install
+npm run dev
+```
+The dev server runs on http://localhost:3000 (`vite --port=3000 --host=0.0.0.0`).
+
+### Run in Docker
+```bash
+docker build -t workshop-game .
+docker run -d -p 8080:80 --name workshop-game workshop-game
+```
+Open http://localhost:8080. Stop it with `docker stop workshop-game` and `docker rm workshop-game`.
+
+### Push to ECR and run on EC2
+On an Amazon Linux EC2 instance with Git and Docker installed, from the cloned repo (replace `<account-id>` and the region; the workshop used `ap-south-1`):
+```bash
+aws ecr create-repository --repository-name workshop-game --region ap-south-1
+docker build -t workshop-game .
+aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin <account-id>.dkr.ecr.ap-south-1.amazonaws.com
+docker tag workshop-game:latest <account-id>.dkr.ecr.ap-south-1.amazonaws.com/workshop-game:latest
+docker push <account-id>.dkr.ecr.ap-south-1.amazonaws.com/workshop-game:latest
+docker run -d -p 8080:80 --name workshop-game <account-id>.dkr.ecr.ap-south-1.amazonaws.com/workshop-game:latest
+```
+Open `http://<EC2-PUBLIC-IP>:8080` and allow inbound port 8080 in the instance's security group.
+
+### Known build issue
+`NeonTypeGame.tsx` imports from `framer-motion`, but `package.json` lists the `motion` package and not `framer-motion`. If `npm run build` fails with an unresolved import, install `framer-motion` or change the import to `motion/react`. I have not run the build to confirm either way.
+
+## Usage
+
+Press Enter (or click the start button), type the first letter of a falling word to target it, finish the word before it reaches the red zone, and keep at least one of 5 lives. `npm run lint` runs `tsc --noEmit`.
 
 ## Project Structure
 
 ```
-KCT-workshop/
+Cloud_workshop/
 ├── src/
-│   ├── components/NeonTypeGame.tsx
-│   ├── data/words.ts
-│   ├── utils/SoundManager.ts
-│   ├── app.tsx
-│   ├── main.tsx
-│   └── index.css
-├── Dockerfile
-├── nginx.conf
-└── package.json
+│   ├── main.tsx                      # React entry point
+│   ├── app.tsx                       # renders the game
+│   ├── components/NeonTypeGame.tsx   # game loop, input, scoring, UI
+│   ├── data/words.ts                 # word list
+│   ├── utils/SoundManager.ts         # Web Audio sound effects
+│   └── index.css                     # Tailwind theme and effects
+├── Dockerfile                        # multi-stage: node build, nginx serve
+├── nginx.conf                        # gzip, headers, SPA fallback, /health
+├── .dockerignore
+├── vite.config.ts                    # React and Tailwind plugins
+├── KCT-workshop.drawio.png           # workshop AWS architecture diagram
+└── README.md
 ```
 
 ---
 
-## License
+## Contact
 
-Licensed under the Apache License 2.0.
+<table>
+  <tr><td><b>GitHub:</b> <a href="https://github.com/Danushika06">Danushika06</a></td><td><b>LinkedIn:</b> <a href="https://www.linkedin.com/in/danushika-n-323b4628b/">danushika-n</a></td></tr>
+  <tr><td colspan="2" align="center"><b>Email:</b> <a href="mailto:danushikanagarajan@gmail.com">danushikanagarajan@gmail.com</a></td></tr>
+</table>
 
----
-
-## AWS Certification
-
-Validate your cloud skills and grow your career: [AWS Certification](https://aws.amazon.com/certification/)
+Built by **Danushika N**
